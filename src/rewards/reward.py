@@ -40,6 +40,7 @@ class EmeraldReward:
         level_weight: float = 1.0,
         badge_weight: float = 10.0,
         step_penalty: float = 0.0,
+        flag_milestones: Optional[list] = None,
     ) -> None:
         self.exploration_weight = exploration_weight
         self.new_map_weight = new_map_weight
@@ -47,12 +48,16 @@ class EmeraldReward:
         self.level_weight = level_weight
         self.badge_weight = badge_weight
         self.step_penalty = step_penalty
+        # Marcos por flag de evento: lista de {"flag": int, "reward": float}.
+        # Recompensa uma única vez por episódio, quando a flag liga (ex.: cutscene).
+        self.flag_milestones = list(flag_milestones or [])
 
         self._visited_positions: set = set()
         self._visited_maps: set = set()
         self._prev_party_count: Optional[int] = None
         self._prev_max_level: Optional[int] = None
         self._prev_badge_count: Optional[int] = None
+        self._fired_flags: set = set()
 
     # ------------------------------------------------------------------ #
     def reset(self) -> None:
@@ -62,6 +67,7 @@ class EmeraldReward:
         self._prev_party_count = None
         self._prev_max_level = None
         self._prev_badge_count = None
+        self._fired_flags = set()
 
     # ------------------------------------------------------------------ #
     def compute(self, info: Optional[dict]) -> float:
@@ -75,8 +81,24 @@ class EmeraldReward:
         reward += self._party_reward(info)
         reward += self._level_reward(info)
         reward += self._badge_reward(info)
+        reward += self._flag_milestone_reward(info)
         reward -= self.step_penalty
         return float(reward)
+
+    def _flag_milestone_reward(self, info: dict) -> float:
+        """Recompensa (uma vez/episódio) quando uma flag de evento liga."""
+        if not self.flag_milestones:
+            return 0.0
+        flags = info.get("flags") or {}
+        total = 0.0
+        for m in self.flag_milestones:
+            fid = m.get("flag")
+            if fid is None or fid in self._fired_flags:
+                continue
+            if flags.get(fid):  # True e não-None
+                self._fired_flags.add(fid)
+                total += float(m.get("reward", 1.0))
+        return total
 
     # ------------------------------------------------------------------ #
     # Componentes

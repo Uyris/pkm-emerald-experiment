@@ -86,6 +86,31 @@ def test_getting_starter_rewarded():
     assert r.compute({"party_count": 1}) == 0.0
 
 
+def test_flag_milestone_rewarded_once():
+    r = EmeraldReward(
+        exploration_weight=0.0, new_map_weight=0.0,
+        flag_milestones=[{"flag": 0x100, "reward": 3.0}],
+    )
+    r.reset()
+    # flag desligada -> 0
+    assert r.compute({"flags": {0x100: False}}) == 0.0
+    # flag liga -> +3
+    assert r.compute({"flags": {0x100: True}}) == pytest.approx(3.0)
+    # já disparou -> 0
+    assert r.compute({"flags": {0x100: True}}) == 0.0
+
+
+def test_flag_milestone_none_is_safe():
+    r = EmeraldReward(
+        exploration_weight=0.0, new_map_weight=0.0,
+        flag_milestones=[{"flag": 0x100, "reward": 3.0}],
+    )
+    r.reset()
+    # flag desconhecida (None, memória indisponível) não dispara
+    assert r.compute({"flags": {0x100: None}}) == 0.0
+    assert r.compute({}) == 0.0
+
+
 def test_step_penalty_applied():
     r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, step_penalty=0.1)
     r.reset()

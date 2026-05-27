@@ -15,6 +15,7 @@ Controles:
     Backspace  → SELECT
     A / S      → L / R
     F5         → salvar state numerado (curr_000.state, curr_001.state, ...)
+    F9         → CARREGAR um state (o de --load, ou o último salvo nesta sessão)
     ESC        → sair
 
 Dica de currículo: jogue do quarto até a bolsa do Birch e dê F5 em vários
@@ -29,6 +30,11 @@ Uso:
 Isso salva roms/curr_000.state, roms/curr_001.state, ... a cada F5.
 Para um único arquivo com nome fixo, use --out:
     python scripts/make_init_state.py --out roms/init_state.state
+
+Continuar a partir de um checkpoint já feito (sem rejogar do começo):
+    python scripts/make_init_state.py --load roms/curr_002.state
+    # começa nesse state; F9 recarrega ele a qualquer momento. Novos F5
+    # continuam a numeração e F9 passa a recarregar o último salvo.
 
 Requer: pygame (`pip install pygame`).
 """
@@ -46,6 +52,8 @@ def main() -> int:
                         help="Caminho FIXO (sobrescreve a cada F5). Ex.: roms/init_state.state")
     parser.add_argument("--out-prefix", default="roms/curr",
                         help="Prefixo p/ states NUMERADOS (curr_000.state, ...). Usado se --out não for dado.")
+    parser.add_argument("--load", default=None,
+                        help="State a carregar no início e ao apertar F9. Ex.: roms/curr_002.state")
     parser.add_argument("--scale", type=int, default=3)
     args = parser.parse_args()
 
@@ -90,8 +98,11 @@ def main() -> int:
         while os.path.exists(f"{args.out_prefix}_{save_idx:03d}.state"):
             save_idx += 1
 
+    # Caminho a recarregar com F9 (o --load, ou o último salvo nesta sessão).
+    load_path = args.load
+
     def save_state() -> None:
-        nonlocal save_idx
+        nonlocal save_idx, load_path
         raw = bytes(gba.core.save_raw_state())
         if args.out is not None:
             path = args.out
@@ -100,11 +111,28 @@ def main() -> int:
             save_idx += 1
         with open(path, "wb") as f:
             f.write(raw)
+        load_path = path  # F9 passa a recarregar o último salvo
         print(f"[ok] state salvo em {path} ({len(raw)} bytes)")
+
+    def load_state() -> None:
+        if not load_path:
+            print("[aviso] nada para carregar (use --load ou salve um state com F5).")
+            return
+        if not os.path.exists(load_path):
+            print(f"[erro] state não encontrado: {load_path}")
+            return
+        with open(load_path, "rb") as f:
+            gba.core.load_raw_state(f.read())
+        gba.core.run_frame()
+        print(f"[ok] state carregado: {load_path}")
+
+    # Carrega o state inicial, se pedido.
+    if args.load:
+        load_state()
 
     pygame.init()
     screen = pygame.display.set_mode((w * args.scale, h * args.scale))
-    pygame.display.set_caption("make_init_state — F5 salva, ESC sai")
+    pygame.display.set_caption("make_init_state — F5 salva, F9 carrega, ESC sai")
     clock = pygame.time.Clock()
 
     running = True
@@ -117,6 +145,8 @@ def main() -> int:
                     running = False
                 elif event.key == pygame.K_F5:
                     save_state()
+                elif event.key == pygame.K_F9:
+                    load_state()
 
         pressed = pygame.key.get_pressed()
         keys = [bit for k, bit in key_map.items() if pressed[k]]

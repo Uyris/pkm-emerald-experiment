@@ -39,17 +39,32 @@ def main() -> None:
     parser.add_argument("--config", default="configs/default.yaml", help="Caminho do YAML.")
     parser.add_argument("--model", default="models/ppo_emerald.zip", help="Caminho do modelo.")
     parser.add_argument("--episodes", type=int, default=None, help="Sobrescreve eval.n_episodes.")
+    parser.add_argument("--init-state", default=None,
+                        help="Força começar SEMPRE neste save state (ignora o currículo). "
+                             "Ex.: --init-state roms/init_state.state para testar partindo do quarto.")
     parser.add_argument("--no-render", action="store_true", help="Desativa a janela de visualização.")
+    parser.add_argument("--stochastic", action="store_true",
+                        help="Amostra ações em vez de usar argmax. Evita travar em loop "
+                             "(ex.: preso num diálogo apertando sempre a mesma direção).")
     args = parser.parse_args()
 
     config = load_config(args.config)
     eval_cfg = config.get("eval", {})
     n_episodes = args.episodes or eval_cfg.get("n_episodes", 5)
-    deterministic = eval_cfg.get("deterministic", True)
+    deterministic = eval_cfg.get("deterministic", True) and not args.stochastic
     render = not args.no_render
 
     # Avaliação roda 1 ambiente (n_envs=1), mesma construção vetorizada do treino.
     config.setdefault("train", {})["n_envs"] = 1
+
+    # --init-state: fixa o ponto de partida e DESLIGA o currículo (init_states
+    # tem prioridade sobre init_state, então precisa ser removido).
+    if args.init_state:
+        emulator = config.setdefault("emulator", {})
+        emulator["init_state"] = args.init_state
+        emulator["init_states"] = None
+        print(f"[eval] começando sempre de: {args.init_state}")
+
     env = make_vec_env(config)
 
     model = PPO.load(args.model, env=env)

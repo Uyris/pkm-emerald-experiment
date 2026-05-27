@@ -34,3 +34,12 @@ def test_saveblock_fields_none_on_mock():
 
 def test_max_level_none_when_party_empty():
     assert make_memory().get_max_level() is None
+
+
+def test_get_flag_none_on_mock():
+    # Ponteiro de SaveBlock1 inválido no mock -> flag indisponível -> None.
+    assert make_memory().get_flag(0x867) is None
+
+
+def test_read_flag_bytes_none_on_mock():
+    assert make_memory().read_flag_bytes(16) is None

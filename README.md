@@ -157,6 +157,35 @@ aumente os pesos dos mais distantes. Defina a meta correspondente em
 `env.goals` (ex.: `party_count: 1`). Quando `init_states` está definido, ele
 tem **prioridade** sobre o `init_state` único.
 
+### Recompensar pré-requisitos (flags de evento)
+
+Alguns objetivos têm **pré-requisitos obrigatórios sem recompensa própria** —
+ex.: no Emerald, antes de pegar o starter é preciso entrar na casa do vizinho e
+apertar A num item, disparando uma cutscene. A navegação entre mapas já é
+premiada por `new_map_weight`, mas essa interação no meio da cadeia não tem
+sinal. Solução: recompensar a **flag de evento** que a cutscene liga.
+
+**1. Descubra a flag** com dois save states (antes/depois do evento):
+
+```bash
+# salve um state ANTES e um DEPOIS da cutscene (com make_init_state.py)
+python scripts/find_event_flag.py \
+  --before roms/before.state --after roms/after.state
+# imprime as flags que ligaram (0 -> 1); idealmente uma só
+```
+
+**2. Configure o milestone** em `reward.flag_milestones` ([configs/default.yaml](configs/default.yaml)):
+
+```yaml
+reward:
+  flag_milestones:
+    - {flag: 0x123, reward: 3.0}   # use a flag encontrada
+```
+
+O agente ganha `reward` na primeira vez que a flag liga no episódio — um marco
+intermediário que torna a cadeia longa (quarto → cutscene → Route 101 → starter)
+aprendível.
+
 ---
 
 ## 🧪 Uso
@@ -175,6 +204,23 @@ python -m src.train --config configs/default.yaml
 python -m src.train --config configs/default.yaml --no-render   # treino sem janela
 python -m src.train --config configs/default.yaml --wandb       # + Weights & Biases
 ```
+
+**Continuar um treino (transferir o aprendizado).** Sem `--resume`, o treino
+começa do **zero** e **sobrescreve** o modelo salvo. Para aproveitar o que o
+agente já aprendeu (ex.: já sabe sair de casa) ao mudar para uma meta mais
+difícil (ex.: pegar o starter):
+
+```bash
+python -m src.train --config configs/default.yaml --resume            # de train.save_path
+python -m src.train --config configs/default.yaml --resume-from models/ppo_emerald.zip
+```
+
+Os pesos da rede são carregados e o treino continua a partir deles (o PPO não
+guarda replay buffer; o "aprendizado" são os pesos). `total_timesteps` passa a
+ser o orçamento **desta** rodada. Requisito: o espaço de observação/ação deve
+bater com o do modelo salvo — ou seja, **não mude `env.frame_stack` nem
+`env.actions`** entre o treino original e o resume (mudar `goals`, `reward` e
+`init_states` é OK e é justamente o ponto).
 
 Uma janela OpenCV (`pokemon-emerald-rl`) mostra a tela real do GBA do ambiente 0
 **durante o treino**. Funciona com 1 ou vários ambientes paralelos. Ajuste

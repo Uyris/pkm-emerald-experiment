@@ -98,9 +98,14 @@ class PokemonEmeraldEnv(gym.Env):
         # Carregamos os bytes uma vez; o backend recebe via set_state no reset.
         self._curriculum_paths = list(init_states) if init_states else []
         self._curriculum_states = [self._read_state(p) for p in self._curriculum_paths]
-        self._curriculum_weights = list(init_state_weights) if init_state_weights else None
-        if self._curriculum_weights and len(self._curriculum_weights) != len(self._curriculum_states):
-            raise ValueError("init_state_weights deve ter o mesmo tamanho de init_states.")
+        # Pesos só fazem sentido com currículo ativo; sem estados, são ignorados
+        # (evita erro de tamanho quando o currículo é desligado, ex.: no evaluate).
+        if self._curriculum_states:
+            self._curriculum_weights = list(init_state_weights) if init_state_weights else None
+            if self._curriculum_weights and len(self._curriculum_weights) != len(self._curriculum_states):
+                raise ValueError("init_state_weights deve ter o mesmo tamanho de init_states.")
+        else:
+            self._curriculum_weights = None
         self.init_state_strategy = init_state_strategy
         self._seq_idx = 0
         # No modo currículo, o env gerencia o estado: backend não auto-carrega.
@@ -121,6 +126,11 @@ class PokemonEmeraldEnv(gym.Env):
         )
         self.memory = EmeraldMemory(self.backend)
         self.reward_fn = EmeraldReward(**(reward_config or {}))
+        # Flags de evento a ler a cada passo (para os milestones do reward).
+        self._milestone_flags = [
+            m["flag"] for m in (reward_config or {}).get("flag_milestones", [])
+            if "flag" in m
+        ]
 
         # --- Espaços ---
         self.action_space = spaces.Discrete(len(self.actions))
@@ -194,6 +204,8 @@ class PokemonEmeraldEnv(gym.Env):
 
         obs = self._get_obs()
         info = self.memory.snapshot()
+        if self._milestone_flags:
+            info["flags"] = {fid: self.memory.get_flag(fid) for fid in self._milestone_flags}
         reward = self.reward_fn.compute(info)
 
         # Término por meta atingida (configurável). Bônus terminal opcional.

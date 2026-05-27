@@ -15,11 +15,14 @@ emulator:
   # Crie os checkpoints jogando: python scripts/make_init_state.py (F5 salva
   # vários, numerados). Leia os map_ids no caminho até a bolsa do Birch.
   # init_states:
-  #   - "roms/curr_000.state"   # parado em frente à bolsa do Birch (mais fácil)
-  #   - "roms/curr_001.state"   # na Route 101
-  #   - "roms/curr_002.state"   # em Littleroot, fora de casa
+  #   - "roms/curr_002.state"   # parado na frente da Pokebola
+  #   - "roms/curr_004.state"   # fora da casa do vizinho
+  #   - "roms/curr_000.state"   # fora da casa do protagonista
+  #   - "roms/curr_006.state"   # em cima do dialogo
   #   - "roms/init_state.state" # no quarto (mais difícil)
-  # init_state_weights: [0.5, 0.25, 0.15, 0.10]   # opcional; default = uniforme
+  # # Peso DOMINANTE no checkpoint do diálogo (curr_006) p/ ele praticar muito a
+  # # ação de apertar A e passar. Mantém uma fração nos outros p/ não esquecer.
+  # init_state_weights: [0.20, 0.15, 0.10, 0.40, 0.15]   # opcional; default = uniforme
   # init_state_strategy: "random"                 # "random" (pesos) ou "sequential"
   #
   # headless é ignorado pelo backend real (a visualização é feita por fora).
@@ -32,7 +35,9 @@ env:
   # Frames do emulador avançados por ação do agente (action repeat / frame skip).
   frame_skip: 4
   # Passos máximos (ações do agente) por episódio antes de truncar.
-  max_steps: 4096
+  # Menor = episódios presos resetam mais rápido (mais tentativas/min, iteração
+  # mais ágil). Do quarto a cadeia é longa; suba de volta quando ele avançar.
+  max_steps: 2048
   # Empilhar N frames no eixo de canais (VecFrameStack). 1 = sem stacking.
   frame_stack: 4
   # Botões disponíveis para a IA (ordem = índice do Discrete).
@@ -53,30 +58,38 @@ reward:
   party_weight: 5.0          # por novo Pokémon no time (starter = 0 -> 1)
   level_weight: 1.0          # por aumento de level
   badge_weight: 10.0         # por nova badge
-  # Custo por passo: a recompensa faz `reward -= step_penalty`.
-  #   > 0  -> penalidade real. CUIDADO: se ~= exploration_weight, anula a
-  #          recompensa de exploração e a IA aprende a ficar parada no canto.
-  #          Se usar, mantenha << exploration_weight (ex.: 0.001).
-  #   < 0  -> BÔNUS por passo (incentiva ficar parado). 0.0 = desligado.
-  # Desligado: a recompensa de exploração já força o movimento.
-  step_penalty: 0.0
+  # Custo por passo (a recompensa faz `reward -= step_penalty`).
+  # Pequeno custo de TEMPO: pressiona a IA a sair de "zonas mortas" (preso em
+  # diálogo, parado no canto) SEM recompensar a ação de sair — então ela
+  # aprende a apertar A pra encerrar o diálogo e voltar a progredir, sem ficar
+  # "viciada em conversar".
+  #   REGRA: mantenha << exploration_weight (ex.: 1/10). Se ~= exploração,
+  #          anula o sinal de explorar e a IA fica parada no canto.
+  #   < 0  -> BÔNUS por passo (incentiva ficar parado); quase nunca é o desejado.
+  step_penalty: 0.0012
+  # Marcos por flag de evento: recompensa (1x/episódio) quando a flag liga.
+  # Útil para pré-requisitos sem sinal próprio (ex.: cutscene na casa do
+  # vizinho, obrigatória antes de pegar o starter). Descubra a flag com:
+  #   python scripts/find_event_flag.py --before roms/before.state --after roms/after.state
+  flag_milestones:
+    - {flag: 0x331, reward: 3.0}   # troque 0x000 pela flag encontrada
 
 train:
   algo: "PPO"
   policy: "CnnPolicy"
-  total_timesteps: 200000
+  total_timesteps: 1000000
   # Paralelismo: 1 -> DummyVecEnv (in-process); >1 -> SubprocVecEnv.
   # Cada env é um processo com seu próprio core do mGBA (~150-250 MB).
   # Use ~nº de núcleos físicos (acima disso não acelera, só consome RAM).
   # Nesta máquina (12 CPUs lógicos / ~24 GB), 8 é um bom ponto de partida.
-  n_envs: 9
-  n_steps: 2048
+  n_envs: 12
+  n_steps: 6000
   batch_size: 256
   n_epochs: 4
   gamma: 0.999
   gae_lambda: 0.95
-  ent_coef: 0.01
-  learning_rate: 0.00025
+  ent_coef: 0.08
+  learning_rate: 0.0003
   clip_range: 0.2
   seed: 42
   # Visualização ao vivo do jogo durante o treino (janela OpenCV).

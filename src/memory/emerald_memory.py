@@ -45,6 +45,10 @@ PARTY_SIZE = 6
 # --- Flags de badges (Emerald): FLAG_BADGE01_GET = 0x867 ---
 FIRST_BADGE_FLAG = 0x867
 
+# Quantos bytes do array de flags ler ao fazer diff (cobre as flags relevantes;
+# 0x140 bytes = 2560 flags, mais que suficiente para os eventos iniciais).
+FLAGS_NUM_BYTES = 0x140
+
 # Faixa válida de EWRAM, usada para sanidade do ponteiro de SaveBlock1.
 _EWRAM_LO = 0x02000000
 _EWRAM_HI = 0x02040000
@@ -127,6 +131,33 @@ class EmeraldMemory:
             if byte & (1 << (flag & 7)):
                 count += 1
         return count
+
+    def get_flag(self, flag_id: int) -> Optional[bool]:
+        """Lê uma flag de evento por id (ex.: cutscene), ou ``None``.
+
+        As flags ficam num bitarray em ``SaveBlock1 + SB1_FLAGS``: o byte é
+        ``flag_id >> 3`` e o bit é ``flag_id & 7``.
+        """
+        base = self._saveblock1()
+        if base is None:
+            return None
+        byte = self._u8(base + SB1_FLAGS + (flag_id >> 3))
+        if byte is None:
+            return None
+        return bool(byte & (1 << (flag_id & 7)))
+
+    def read_flag_bytes(self, count: int = FLAGS_NUM_BYTES) -> Optional[bytes]:
+        """Lê ``count`` bytes crus do array de flags (para diff entre states)."""
+        base = self._saveblock1()
+        if base is None:
+            return None
+        out = bytearray()
+        for i in range(count):
+            b = self._u8(base + SB1_FLAGS + i)
+            if b is None:
+                return None
+            out.append(b)
+        return bytes(out)
 
     def get_map_id(self) -> Optional[Tuple[int, int]]:
         """Identificador do mapa atual ``(group, num)``, ou ``None``."""

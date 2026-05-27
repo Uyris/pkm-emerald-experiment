@@ -29,6 +29,10 @@ def main() -> None:
     parser.add_argument("--config", default="configs/default.yaml", help="Caminho do YAML.")
     parser.add_argument("--no-render", action="store_true", help="Desativa a janela de visualização.")
     parser.add_argument("--wandb", action="store_true", help="Ativa logging no Weights & Biases.")
+    parser.add_argument("--resume", action="store_true",
+                        help="Continua o treino a partir do modelo em train.save_path (transfere o aprendizado).")
+    parser.add_argument("--resume-from", default=None,
+                        help="Continua a partir deste modelo .zip específico.")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -42,21 +46,32 @@ def main() -> None:
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     tensorboard_log = train_cfg.get("tensorboard_log", "tensorboard/")
 
-    model = PPO(
-        policy=train_cfg.get("policy", "CnnPolicy"),
-        env=env,
-        n_steps=train_cfg.get("n_steps", 2048),
-        batch_size=train_cfg.get("batch_size", 256),
-        n_epochs=train_cfg.get("n_epochs", 4),
-        gamma=train_cfg.get("gamma", 0.999),
-        gae_lambda=train_cfg.get("gae_lambda", 0.95),
-        ent_coef=train_cfg.get("ent_coef", 0.01),
-        learning_rate=train_cfg.get("learning_rate", 2.5e-4),
-        clip_range=train_cfg.get("clip_range", 0.2),
-        seed=train_cfg.get("seed", 42),
-        tensorboard_log=tensorboard_log,
-        verbose=1,
-    )
+    # --- Resumir treino: carrega pesos existentes (transfere o que já aprendeu) ---
+    resume_path = args.resume_from or (save_path if args.resume else None)
+    if resume_path:
+        if not os.path.exists(resume_path):
+            raise FileNotFoundError(
+                f"--resume pedido mas o modelo não existe: {resume_path}. "
+                "Treine uma primeira vez (sem --resume) ou cheque o caminho."
+            )
+        print(f"[resume] Carregando pesos de {resume_path} e continuando o treino.")
+        model = PPO.load(resume_path, env=env, tensorboard_log=tensorboard_log, verbose=1)
+    else:
+        model = PPO(
+            policy=train_cfg.get("policy", "CnnPolicy"),
+            env=env,
+            n_steps=train_cfg.get("n_steps", 2048),
+            batch_size=train_cfg.get("batch_size", 256),
+            n_epochs=train_cfg.get("n_epochs", 4),
+            gamma=train_cfg.get("gamma", 0.999),
+            gae_lambda=train_cfg.get("gae_lambda", 0.95),
+            ent_coef=train_cfg.get("ent_coef", 0.01),
+            learning_rate=train_cfg.get("learning_rate", 2.5e-4),
+            clip_range=train_cfg.get("clip_range", 0.2),
+            seed=train_cfg.get("seed", 42),
+            tensorboard_log=tensorboard_log,
+            verbose=1,
+        )
 
     # ---- Callbacks ----
     callbacks = [
