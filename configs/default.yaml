@@ -33,16 +33,17 @@ reward:
   level_weight: 1.0          # por aumento de level
   badge_weight: 10.0         # por nova badge
   # Custo por passo: a recompensa faz `reward -= step_penalty`.
-  #   > 0  -> penalidade real (desincentiva enrolar). MAS mantenha bem menor
-  #          que exploration_weight, senão anula a recompensa de exploração.
-  #   < 0  -> BÔNUS por passo (incentiva ficar parado) — quase nunca é o que
-  #          você quer. 0.0 = desligado.
-  step_penalty: 0.01
+  #   > 0  -> penalidade real. CUIDADO: se ~= exploration_weight, anula a
+  #          recompensa de exploração e a IA aprende a ficar parada no canto.
+  #          Se usar, mantenha << exploration_weight (ex.: 0.001).
+  #   < 0  -> BÔNUS por passo (incentiva ficar parado). 0.0 = desligado.
+  # Desligado: a recompensa de exploração já força o movimento.
+  step_penalty: 0.0
 
 train:
   algo: "PPO"
   policy: "CnnPolicy"
-  total_timesteps: 1000000
+  total_timesteps: 200000
   # Paralelismo: 1 -> DummyVecEnv (in-process); >1 -> SubprocVecEnv.
   # Cada env é um processo com seu próprio core do mGBA (~150-250 MB).
   # Use ~nº de núcleos físicos (acima disso não acelera, só consome RAM).
