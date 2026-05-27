@@ -103,18 +103,29 @@ class GbaBackend:
         if init_state:
             with open(init_state, "rb") as f:
                 self._init_state_bytes = f.read()
+        # Estado pendente p/ o próximo reset (usado pelo currículo do env).
+        self._pending_state: Optional[bytes] = None
 
         self._pressed: set[str] = set()
 
     # ------------------------------------------------------------------ #
     # Ciclo de vida
     # ------------------------------------------------------------------ #
+    def set_state(self, raw: Optional[bytes]) -> None:
+        """Define o save state (bytes) a aplicar no PRÓXIMO :meth:`reset`.
+
+        Usado pelo currículo: o env sorteia um estado e o injeta antes do reset.
+        ``None`` volta ao comportamento padrão (usa o ``init_state`` do construtor).
+        """
+        self._pending_state = raw
+
     def reset(self) -> None:
-        """Reinicia o emulador e aplica o ``init_state`` se houver."""
+        """Reinicia o emulador e aplica o estado pendente / ``init_state``."""
         self._pressed.clear()
         self._core.reset()
-        if self._init_state_bytes is not None:
-            self._core.load_raw_state(self._init_state_bytes)
+        state = self._pending_state if self._pending_state is not None else self._init_state_bytes
+        if state is not None:
+            self._core.load_raw_state(state)
             self._core.run_frame()  # renderiza o estado carregado
 
     def close(self) -> None:
@@ -219,6 +230,10 @@ class MockGbaBackend:
         self._frame_count = 0
 
     # Ciclo de vida
+    def set_state(self, raw: Optional[bytes]) -> None:
+        """No-op no mock (mantém o contrato do currículo)."""
+        return None
+
     def reset(self) -> None:
         self._pressed.clear()
         self._frame_count = 0

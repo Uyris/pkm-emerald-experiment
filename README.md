@@ -121,6 +121,44 @@ intro) — útil só para testar o pipeline.
 
 ---
 
+## 🎓 Currículo de save states (metas distantes)
+
+Para metas longe do início (ex.: **pegar o starter** na bolsa do Prof. Birch),
+exigir a jornada inteira de uma vez é quase impossível para o agente descobrir
+(recompensa esparsa, horizonte longo). A solução é um **currículo**: começar de
+estados próximos da meta (fáceis) e ir afastando.
+
+**1. Crie os checkpoints** jogando do quarto até a bolsa, dando F5 em vários pontos:
+
+```bash
+python scripts/make_init_state.py \
+  --rom "roms/Pokemon - Emerald Version (USA, Europe).gba" \
+  --out-prefix roms/curr
+# Cada F5 salva roms/curr_000.state, roms/curr_001.state, ...
+# Sugestão: F5 em (a) frente à bolsa, (b) Route 101, (c) fora de casa, (d) no quarto.
+```
+
+**2. Liste-os** em `emulator.init_states` (em [configs/default.yaml](configs/default.yaml)),
+os mais perto da meta primeiro, com pesos maiores:
+
+```yaml
+emulator:
+  init_states:
+    - "roms/curr_000.state"   # em frente à bolsa (fácil)
+    - "roms/curr_001.state"   # Route 101
+    - "roms/curr_002.state"   # fora de casa
+    - "roms/init_state.state" # no quarto (difícil)
+  init_state_weights: [0.5, 0.25, 0.15, 0.10]   # opcional (default = uniforme)
+  init_state_strategy: "random"                 # "random" (pesos) ou "sequential"
+```
+
+A cada `reset`, um estado é sorteado. Conforme o agente domina os fáceis,
+aumente os pesos dos mais distantes. Defina a meta correspondente em
+`env.goals` (ex.: `party_count: 1`). Quando `init_states` está definido, ele
+tem **prioridade** sobre o `init_state` único.
+
+---
+
 ## 🧪 Uso
 
 ### Smoke test com ações aleatórias (com janela do jogo)

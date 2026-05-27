@@ -47,6 +47,17 @@ class PokemonEmeraldEnv(gym.Env):
         headless: roda o emulador sem janela.
         actions: sequência de botões que compõem o action space (na ordem do
             índice ``Discrete``). Default :data:`DEFAULT_ACTIONS` (sem START).
+        goals: dict com condições de término do episódio (``terminated=True``).
+            Chaves suportadas:
+              * ``leave_start_map`` (bool): termina ao sair do mapa inicial
+                (ex.: sair do quarto).
+              * ``party_count`` (int): termina quando o time tiver >= N Pokémon
+                (ex.: 1 = pegou o starter).
+              * ``map`` ([group, num]): termina ao chegar nesse mapa
+                (ex.: Oldale Town, quando você souber o id).
+              * ``goal_reward`` (float): bônus somado à recompensa ao atingir
+                a meta. Default 0.0.
+            ``None``/vazio → sem término por meta (só trunca por max_steps).
         backend: instância de backend já criada (injeção para testes). Se
             ``None``, cria um :class:`GbaBackend`.
     """
@@ -57,6 +68,9 @@ class PokemonEmeraldEnv(gym.Env):
         self,
         rom_path: Optional[str] = None,
         init_state: Optional[str] = None,
+        init_states: Optional[Sequence[str]] = None,
+        init_state_weights: Optional[Sequence[float]] = None,
+        init_state_strategy: str = "random",
         obs_width: int = 84,
         obs_height: int = 84,
         frame_skip: int = 4,
@@ -64,6 +78,7 @@ class PokemonEmeraldEnv(gym.Env):
         reward_config: Optional[dict] = None,
         headless: bool = True,
         actions: Optional[Sequence[str]] = None,
+        goals: Optional[dict] = None,
         render_mode: Optional[str] = None,
         backend: Optional[GbaBackend] = None,
     ) -> None:
@@ -73,7 +88,24 @@ class PokemonEmeraldEnv(gym.Env):
         self.obs_height = obs_height
         self.frame_skip = max(1, frame_skip)
         self.max_steps = max_steps
+        self.goals = goals or {}
+        self.goal_reward = float(self.goals.get("goal_reward", 0.0))
         self.render_mode = render_mode
+
+        # --- Currículo de save states ---
+        # Se `init_states` (lista) for dado, um estado é sorteado a cada reset
+        # (do mais perto da meta ao mais longe → aprende do fácil ao difícil).
+        # Carregamos os bytes uma vez; o backend recebe via set_state no reset.
+        self._curriculum_paths = list(init_states) if init_states else []
+        self._curriculum_states = [self._read_state(p) for p in self._curriculum_paths]
+        self._curriculum_weights = list(init_state_weights) if init_state_weights else None
+        if self._curriculum_weights and len(self._curriculum_weights) != len(self._curriculum_states):
+            raise ValueError("init_state_weights deve ter o mesmo tamanho de init_states.")
+        self.init_state_strategy = init_state_strategy
+        self._seq_idx = 0
+        # No modo currículo, o env gerencia o estado: backend não auto-carrega.
+        self._use_curriculum = bool(self._curriculum_states)
+        backend_init_state = None if self._use_curriculum else init_state
 
         # --- Ações (configurável; valida contra os botões do backend) ---
         self.actions = tuple(actions) if actions else DEFAULT_ACTIONS
@@ -85,7 +117,7 @@ class PokemonEmeraldEnv(gym.Env):
 
         # --- Camada de emulação (injetável para testes) ---
         self.backend = backend or GbaBackend(
-            rom_path=rom_path, init_state=init_state, headless=headless
+            rom_path=rom_path, init_state=backend_init_state, headless=headless
         )
         self.memory = EmeraldMemory(self.backend)
         self.reward_fn = EmeraldReward(**(reward_config or {}))
@@ -101,6 +133,7 @@ class PokemonEmeraldEnv(gym.Env):
 
         self._steps = 0
         self._last_frame: Optional[np.ndarray] = None
+        self._start_map: Optional[tuple] = None
 
     # ------------------------------------------------------------------ #
     # Gymnasium API
@@ -113,13 +146,38 @@ class PokemonEmeraldEnv(gym.Env):
     ) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
 
+        # Currículo: sorteia qual save state usar neste episódio.
+        chosen_path = None
+        if self._use_curriculum:
+            idx = self._pick_state_index()
+            self.backend.set_state(self._curriculum_states[idx])
+            chosen_path = self._curriculum_paths[idx]
+
         self.backend.reset()
         self.reward_fn.reset()
         self._steps = 0
 
         obs = self._get_obs()
         info = self.memory.snapshot()
+        # Mapa inicial do episódio (referência para a meta "sair do mapa").
+        self._start_map = info.get("map_id")
+        if chosen_path is not None:
+            info["init_state"] = chosen_path
         return obs, info
+
+    def _pick_state_index(self) -> int:
+        """Escolhe o índice do save state do currículo para este episódio."""
+        n = len(self._curriculum_states)
+        if self.init_state_strategy == "sequential":
+            idx = self._seq_idx % n
+            self._seq_idx += 1
+            return idx
+        # "random" (com pesos opcionais). Usa o RNG do Gymnasium (semeável).
+        if self._curriculum_weights:
+            probs = np.asarray(self._curriculum_weights, dtype=float)
+            probs = probs / probs.sum()
+            return int(self.np_random.choice(n, p=probs))
+        return int(self.np_random.integers(n))
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
         if not self.action_space.contains(int(action)):
@@ -138,13 +196,39 @@ class PokemonEmeraldEnv(gym.Env):
         info = self.memory.snapshot()
         reward = self.reward_fn.compute(info)
 
-        # Por enquanto não há condição de fim "vitória/derrota" mapeada.
-        terminated = False
+        # Término por meta atingida (configurável). Bônus terminal opcional.
+        terminated, reason = self._check_goal(info)
+        if terminated:
+            reward += self.goal_reward
+            info["goal_reached"] = reason
         truncated = self._steps >= self.max_steps
 
         info["steps"] = self._steps
         info["action"] = button
         return obs, reward, terminated, truncated, info
+
+    def _check_goal(self, info: dict) -> tuple[bool, Optional[str]]:
+        """Avalia as condições de meta. Retorna ``(terminated, motivo)``.
+
+        Valores ``None`` na memória nunca disparam término (tolerante a falhas).
+        """
+        map_id = info.get("map_id")
+        party = info.get("party_count")
+
+        if self.goals.get("leave_start_map") and map_id is not None \
+                and self._start_map is not None and map_id != self._start_map:
+            return True, "leave_start_map"
+
+        target_party = self.goals.get("party_count")
+        if target_party is not None and party is not None and party >= target_party:
+            return True, "party_count"
+
+        target_map = self.goals.get("map")
+        if target_map is not None and map_id is not None \
+                and tuple(target_map) == tuple(map_id):
+            return True, "map"
+
+        return False, None
 
     def render(self) -> Optional[np.ndarray]:
         """Retorna o frame RGB atual (modo ``rgb_array``)."""
@@ -158,6 +242,11 @@ class PokemonEmeraldEnv(gym.Env):
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _read_state(path: str) -> bytes:
+        with open(path, "rb") as f:
+            return f.read()
+
     def _get_obs(self) -> np.ndarray:
         frame = self.backend.get_screen()
         self._last_frame = frame

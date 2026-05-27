@@ -4,10 +4,24 @@
 emulator:
   # Caminho para a sua ROM legal (NÃO versionada). Veja README.
   rom_path: "roms/Pokemon - Emerald Version (USA, Europe).gba"
-  # Save state opcional carregado no reset. RECOMENDADO: aponte para um estado
-  # salvo já dentro do quarto inicial (a IA não navega o intro/criação de save).
-  # Gere um com: python scripts/make_init_state.py  (veja README).
+  # Save state ÚNICO carregado no reset (a IA não navega o intro/criação de save).
+  # Gere com: python scripts/make_init_state.py  (veja README).
   init_state: "roms/init_state.state"
+  #
+  # --- CURRÍCULO (recomendado p/ metas distantes, ex.: pegar o starter) ---
+  # Se `init_states` (lista) for definido, ele TEM PRIORIDADE sobre init_state:
+  # a cada reset um estado é sorteado. Comece com pesos altos nos estados
+  # PERTO da meta (fáceis) e vá aumentando os mais distantes conforme aprende.
+  # Crie os checkpoints jogando: python scripts/make_init_state.py (F5 salva
+  # vários, numerados). Leia os map_ids no caminho até a bolsa do Birch.
+  # init_states:
+  #   - "roms/curr_000.state"   # parado em frente à bolsa do Birch (mais fácil)
+  #   - "roms/curr_001.state"   # na Route 101
+  #   - "roms/curr_002.state"   # em Littleroot, fora de casa
+  #   - "roms/init_state.state" # no quarto (mais difícil)
+  # init_state_weights: [0.5, 0.25, 0.15, 0.10]   # opcional; default = uniforme
+  # init_state_strategy: "random"                 # "random" (pesos) ou "sequential"
+  #
   # headless é ignorado pelo backend real (a visualização é feita por fora).
   headless: true
 
@@ -25,6 +39,13 @@ env:
   # START fica de fora de propósito: abre o menu/salva e atrapalha a meta
   # inicial. Para reativar, adicione "START" (e "SELECT" se quiser) à lista.
   actions: ["UP", "DOWN", "LEFT", "RIGHT", "A", "B"]
+  # Condição de término do episódio (terminated=True ao atingir a meta).
+  # Sem isto, o episódio só termina por max_steps (fica longo após sair do quarto).
+  goals:
+    # leave_start_map: true   # termina ao sair do mapa inicial (sair do quarto)
+    party_count: 1        # termina ao pegar o starter (descomente p/ escalar)
+    # map: [0, 1]           # termina ao chegar nesse [grupo, nº] de mapa (ex.: Oldale)
+    goal_reward: 10.0       # bônus ao atingir a meta
 
 reward:
   exploration_weight: 0.01   # por visitar tile (map, x, y) inédito
@@ -61,7 +82,7 @@ train:
   # Visualização ao vivo do jogo durante o treino (janela OpenCV).
   render: true
   render_all_envs: true   # true = mosaico com TODOS os envs; false = só o env 0
-  render_freq: 1          # atualiza a cada N passos (use >1 com muitos envs)
+  render_freq: 10          # atualiza a cada N passos (use >1 com muitos envs)
   render_scale: 2         # ampliação por célula (GBA é 240x160; menor p/ caber a grade)
   # Logging
   tensorboard_log: "tensorboard/"

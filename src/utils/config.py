@@ -51,12 +51,16 @@ def make_env(
     return PokemonEmeraldEnv(
         rom_path=emulator.get("rom_path"),
         init_state=emulator.get("init_state"),
+        init_states=emulator.get("init_states"),
+        init_state_weights=emulator.get("init_state_weights"),
+        init_state_strategy=emulator.get("init_state_strategy", "random"),
         headless=emulator.get("headless", True),
         obs_width=env_cfg.get("obs_width", 84),
         obs_height=env_cfg.get("obs_height", 84),
         frame_skip=env_cfg.get("frame_skip", 4),
         max_steps=env_cfg.get("max_steps", 4096),
         actions=env_cfg.get("actions"),  # None -> DEFAULT_ACTIONS (sem START)
+        goals=env_cfg.get("goals"),
         reward_config=reward_cfg,
         render_mode=render_mode,
         backend=backend,
