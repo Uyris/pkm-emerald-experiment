@@ -1,0 +1,48 @@
+# --- ROMs and save states (NEVER commit) ---
+roms/
+*.gba
+*.gb
+*.gbc
+*.sav
+*.state
+*.ss0
+*.ss1
+
+# --- Models / checkpoints / logs ---
+models/
+checkpoints/
+logs/
+runs/
+tensorboard/
+*.zip
+*.pt
+*.pth
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Misc ---
+*.log
+.env
+.claude/

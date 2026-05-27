@@ -1,0 +1,29 @@
+# Core RL
+gymnasium>=0.29
+stable-baselines3>=2.3.0
+torch>=2.2
+
+# Observation processing / visualização
+numpy>=1.24
+opencv-python>=4.9
+
+# Emulator integration (GBA)
+# pygba dirige o mGBA via o binding Python `mgba`.
+# O `mgba` NÃO está no PyPI para Windows — instale o binding pré-compilado com:
+#     python scripts/install_mgba.py
+# (baixa o libmgba-py para a sua plataforma). cffi é exigido pelo binding.
+pygba>=0.2.0
+cffi>=1.16
+
+# Config + utils
+pyyaml>=6.0
+
+# Logging
+tensorboard>=2.15
+# Weights & Biases (opcional, ative com --wandb):
+# wandb>=0.16
+
+# Tests
+pytest>=8.0
+
+stable-baselines3[extra]

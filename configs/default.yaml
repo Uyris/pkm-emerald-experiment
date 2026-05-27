@@ -1,0 +1,77 @@
+# Configuração padrão do pokemon-emerald-rl
+# Use com: python -m src.train --config configs/default.yaml
+
+emulator:
+  # Caminho para a sua ROM legal (NÃO versionada). Veja README.
+  rom_path: "roms/Pokemon - Emerald Version (USA, Europe).gba"
+  # Save state opcional carregado no reset. RECOMENDADO: aponte para um estado
+  # salvo já dentro do quarto inicial (a IA não navega o intro/criação de save).
+  # Gere um com: python scripts/make_init_state.py  (veja README).
+  init_state: "roms/init_state.state"
+  # headless é ignorado pelo backend real (a visualização é feita por fora).
+  headless: true
+
+env:
+  # Resolução final da observação (grayscale).
+  obs_width: 84
+  obs_height: 84
+  # Frames do emulador avançados por ação do agente (action repeat / frame skip).
+  frame_skip: 4
+  # Passos máximos (ações do agente) por episódio antes de truncar.
+  max_steps: 4096
+  # Empilhar N frames no eixo de canais (VecFrameStack). 1 = sem stacking.
+  frame_stack: 4
+  # Botões disponíveis para a IA (ordem = índice do Discrete).
+  # START fica de fora de propósito: abre o menu/salva e atrapalha a meta
+  # inicial. Para reativar, adicione "START" (e "SELECT" se quiser) à lista.
+  actions: ["UP", "DOWN", "LEFT", "RIGHT", "A", "B"]
+
+reward:
+  exploration_weight: 0.01   # por visitar tile (map, x, y) inédito
+  new_map_weight: 1.0        # por entrar em um mapa novo
+  party_weight: 5.0          # por novo Pokémon no time (starter = 0 -> 1)
+  level_weight: 1.0          # por aumento de level
+  badge_weight: 10.0         # por nova badge
+  # Custo por passo: a recompensa faz `reward -= step_penalty`.
+  #   > 0  -> penalidade real (desincentiva enrolar). MAS mantenha bem menor
+  #          que exploration_weight, senão anula a recompensa de exploração.
+  #   < 0  -> BÔNUS por passo (incentiva ficar parado) — quase nunca é o que
+  #          você quer. 0.0 = desligado.
+  step_penalty: 0.01
+
+train:
+  algo: "PPO"
+  policy: "CnnPolicy"
+  total_timesteps: 1000000
+  # Paralelismo: 1 -> DummyVecEnv (in-process); >1 -> SubprocVecEnv.
+  # Cada env é um processo com seu próprio core do mGBA (~150-250 MB).
+  # Use ~nº de núcleos físicos (acima disso não acelera, só consome RAM).
+  # Nesta máquina (12 CPUs lógicos / ~24 GB), 8 é um bom ponto de partida.
+  n_envs: 9
+  n_steps: 2048
+  batch_size: 256
+  n_epochs: 4
+  gamma: 0.999
+  gae_lambda: 0.95
+  ent_coef: 0.01
+  learning_rate: 0.00025
+  clip_range: 0.2
+  seed: 42
+  # Visualização ao vivo do jogo durante o treino (janela OpenCV).
+  render: true
+  render_all_envs: true   # true = mosaico com TODOS os envs; false = só o env 0
+  render_freq: 1          # atualiza a cada N passos (use >1 com muitos envs)
+  render_scale: 2         # ampliação por célula (GBA é 240x160; menor p/ caber a grade)
+  # Logging
+  tensorboard_log: "tensorboard/"
+  stats_log_freq: 256
+  checkpoint_freq: 50000
+  save_path: "models/ppo_emerald.zip"
+  # Weights & Biases (opcional; também ativável via --wandb)
+  wandb: false
+  wandb_project: "pokemon-emerald-rl"
+
+eval:
+  n_episodes: 5
+  deterministic: true
+  render_scale: 3
