@@ -20,7 +20,11 @@ import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
 
-from src.utils.callbacks import GameStatsCallback, RenderCallback
+from src.utils.callbacks import (
+    EntCoefDecayCallback,
+    GameStatsCallback,
+    RenderCallback,
+)
 from src.utils.config import load_config, make_vec_env
 
 
@@ -91,11 +95,26 @@ def main() -> None:
             )
         )
 
+    total_timesteps = train_cfg.get("total_timesteps", 1_000_000)
+
+    # Decaimento de ent_coef (explora cedo, exploita no fim) — se configurado.
+    ent_coef_final = train_cfg.get("ent_coef_final")
+    if ent_coef_final is not None:
+        ent_coef_start = train_cfg.get("ent_coef", 0.01)
+        callbacks.append(
+            EntCoefDecayCallback(
+                initial=ent_coef_start,
+                final=ent_coef_final,
+                total_timesteps=total_timesteps,
+            )
+        )
+        print(f"[ent_coef] decaindo de {ent_coef_start} -> {ent_coef_final} ao longo de {total_timesteps} passos.")
+
     if args.wandb or train_cfg.get("wandb", False):
         _maybe_add_wandb(callbacks, config)
 
     model.learn(
-        total_timesteps=train_cfg.get("total_timesteps", 1_000_000),
+        total_timesteps=total_timesteps,
         callback=CallbackList(callbacks),
         progress_bar=True,
     )

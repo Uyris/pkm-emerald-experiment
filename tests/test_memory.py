@@ -43,3 +43,7 @@ def test_get_flag_none_on_mock():
 
 def test_read_flag_bytes_none_on_mock():
     assert make_memory().read_flag_bytes(16) is None
+
+
+def test_event_flag_count_none_on_mock():
+    assert make_memory().get_event_flag_count() is None

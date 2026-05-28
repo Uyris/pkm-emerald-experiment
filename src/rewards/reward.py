@@ -39,6 +39,7 @@ class EmeraldReward:
         party_weight: float = 5.0,
         level_weight: float = 1.0,
         badge_weight: float = 10.0,
+        event_weight: float = 0.0,
         step_penalty: float = 0.0,
         flag_milestones: Optional[list] = None,
     ) -> None:
@@ -47,6 +48,10 @@ class EmeraldReward:
         self.party_weight = party_weight
         self.level_weight = level_weight
         self.badge_weight = badge_weight
+        # Progresso de história: recompensa por NOVA flag de evento setada
+        # (estilo PWhiddy). Robusto contra "farm" de diálogo. Veja
+        # EmeraldMemory.get_event_flag_count.
+        self.event_weight = event_weight
         self.step_penalty = step_penalty
         # Marcos por flag de evento: lista de {"flag": int, "reward": float}.
         # Recompensa uma única vez por episódio, quando a flag liga (ex.: cutscene).
@@ -57,6 +62,7 @@ class EmeraldReward:
         self._prev_party_count: Optional[int] = None
         self._prev_max_level: Optional[int] = None
         self._prev_badge_count: Optional[int] = None
+        self._max_event_count: Optional[int] = None
         self._fired_flags: set = set()
 
     # ------------------------------------------------------------------ #
@@ -67,6 +73,7 @@ class EmeraldReward:
         self._prev_party_count = None
         self._prev_max_level = None
         self._prev_badge_count = None
+        self._max_event_count = None
         self._fired_flags = set()
 
     # ------------------------------------------------------------------ #
@@ -81,9 +88,31 @@ class EmeraldReward:
         reward += self._party_reward(info)
         reward += self._level_reward(info)
         reward += self._badge_reward(info)
+        reward += self._event_reward(info)
         reward += self._flag_milestone_reward(info)
         reward -= self.step_penalty
         return float(reward)
+
+    def _event_reward(self, info: dict) -> float:
+        """Recompensa por progresso de história (novas flags de evento setadas).
+
+        Usa o MÁXIMO visto no episódio como base: só pontua quando a contagem
+        ultrapassa esse máximo (robusto a flags TEMP que ligam/desligam). O 1º
+        passo só calibra a base (flags já setadas no save state não pontuam).
+        """
+        if self.event_weight == 0:
+            return 0.0
+        count = info.get("event_flag_count")
+        if count is None:
+            return 0.0
+        if self._max_event_count is None:
+            self._max_event_count = count
+            return 0.0
+        if count > self._max_event_count:
+            delta = count - self._max_event_count
+            self._max_event_count = count
+            return self.event_weight * delta
+        return 0.0
 
     def _flag_milestone_reward(self, info: dict) -> float:
         """Recompensa (uma vez/episódio) quando uma flag de evento liga."""

@@ -230,6 +230,9 @@ Uma janela OpenCV (`pokemon-emerald-rl`) mostra a tela real do GBA do ambiente 0
 
 ```bash
 python -m src.evaluate --config configs/default.yaml --model models/ppo_emerald.zip
+python -m src.evaluate --init-state roms/init_state.state   # começa sempre do quarto
+python -m src.evaluate --stochastic                         # amostra ações (evita travar em loop)
+python -m src.evaluate --record runs/eval.mp4               # grava o vídeo da avaliação
 ```
 
 ### TensorBoard
@@ -238,7 +241,7 @@ python -m src.evaluate --config configs/default.yaml --model models/ppo_emerald.
 tensorboard --logdir tensorboard/
 ```
 Métricas do jogo (`game/party_count`, `game/max_level`, `game/badge_count`,
-`game/map_code`) e do PPO ficam registradas ali.
+`game/map_code`, `game/event_flag_count`) e do PPO ficam registradas ali.
 
 ### Testes
 

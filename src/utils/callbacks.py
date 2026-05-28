@@ -7,6 +7,8 @@
   ao cruzar a fronteira de processo).
 * :class:`GameStatsCallback` — registra métricas do jogo (mapas visitados,
   party_count, level, badges, posição) no TensorBoard.
+* :class:`EntCoefDecayCallback` — decai linearmente o ``ent_coef`` ao longo do
+  treino (explora muito no começo, exploita no fim).
 """
 
 from __future__ import annotations
@@ -163,4 +165,40 @@ class GameStatsCallback(BaseCallback):
         if map_id is not None:
             # Identificador numérico estável para o mapa (group*1000 + num).
             self.logger.record("game/map_code", map_id[0] * 1000 + map_id[1])
+        events = info.get("event_flag_count")
+        if events is not None:
+            self.logger.record("game/event_flag_count", events)
+        return True
+
+
+class EntCoefDecayCallback(BaseCallback):
+    """Decai linearmente o ``ent_coef`` do PPO ao longo do treino.
+
+    Explorar muito no começo (ent_coef alto) e exploitar no fim (ent_coef
+    baixo). O PPO lê ``model.ent_coef`` a cada atualização, então basta
+    sobrescrevê-lo aqui.
+
+    Args:
+        initial: ent_coef no início (passo 0).
+        final: ent_coef ao atingir ``total_timesteps``.
+        total_timesteps: horizonte do decaimento (use o mesmo do ``learn``).
+    """
+
+    def __init__(
+        self,
+        initial: float,
+        final: float,
+        total_timesteps: int,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.initial = float(initial)
+        self.final = float(final)
+        self.total_timesteps = max(1, int(total_timesteps))
+
+    def _on_step(self) -> bool:
+        frac = min(1.0, self.num_timesteps / self.total_timesteps)
+        value = self.initial + frac * (self.final - self.initial)
+        self.model.ent_coef = value
+        self.logger.record("train/ent_coef_now", value)
         return True

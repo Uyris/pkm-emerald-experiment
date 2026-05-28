@@ -206,6 +206,8 @@ class PokemonEmeraldEnv(gym.Env):
         info = self.memory.snapshot()
         if self._milestone_flags:
             info["flags"] = {fid: self.memory.get_flag(fid) for fid in self._milestone_flags}
+        if self.reward_fn.event_weight > 0:
+            info["event_flag_count"] = self.memory.get_event_flag_count()
         reward = self.reward_fn.compute(info)
 
         # Término por meta atingida (configurável). Bônus terminal opcional.

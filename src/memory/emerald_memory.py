@@ -49,6 +49,13 @@ FIRST_BADGE_FLAG = 0x867
 # 0x140 bytes = 2560 flags, mais que suficiente para os eventos iniciais).
 FLAGS_NUM_BYTES = 0x140
 
+# Tamanho do array de flags do Emerald (FLAGS_COUNT/8 ~= 0x12C). Usado para
+# contar quantas flags de evento estão setadas (sinal de progresso de história,
+# estilo PWhiddy). Os primeiros bytes contêm flags TEMP (que ligam/desligam na
+# jogatina normal); pulamos eles para reduzir ruído na contagem.
+EVENT_FLAGS_NUM_BYTES = 0x12C
+EVENT_FLAGS_SKIP_BYTES = 0x08  # ~64 primeiras flags (TEMP/diárias) ignoradas
+
 # Faixa válida de EWRAM, usada para sanidade do ponteiro de SaveBlock1.
 _EWRAM_LO = 0x02000000
 _EWRAM_HI = 0x02040000
@@ -147,17 +154,29 @@ class EmeraldMemory:
         return bool(byte & (1 << (flag_id & 7)))
 
     def read_flag_bytes(self, count: int = FLAGS_NUM_BYTES) -> Optional[bytes]:
-        """Lê ``count`` bytes crus do array de flags (para diff entre states)."""
+        """Lê ``count`` bytes crus do array de flags (leitura em bloco)."""
         base = self._saveblock1()
         if base is None:
             return None
-        out = bytearray()
-        for i in range(count):
-            b = self._u8(base + SB1_FLAGS + i)
-            if b is None:
-                return None
-            out.append(b)
-        return bytes(out)
+        try:
+            data = self.backend.read_memory(base + SB1_FLAGS, count)
+        except Exception:
+            return None
+        if data is None:
+            return None
+        return bytes(data)
+
+    def get_event_flag_count(self) -> Optional[int]:
+        """Número de flags de evento setadas — proxy de progresso de história.
+
+        Conta os bits ligados no array de flags (pulando as TEMP iniciais). Não
+        é "farmável" conversando com NPC: a maioria das interações não seta flag
+        permanente; só eventos de progresso setam. ``None`` se indisponível.
+        """
+        data = self.read_flag_bytes(EVENT_FLAGS_NUM_BYTES)
+        if data is None:
+            return None
+        return sum(bin(b).count("1") for b in data[EVENT_FLAGS_SKIP_BYTES:])
 
     def get_map_id(self) -> Optional[Tuple[int, int]]:
         """Identificador do mapa atual ``(group, num)``, ou ``None``."""

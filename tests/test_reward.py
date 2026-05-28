@@ -86,6 +86,34 @@ def test_getting_starter_rewarded():
     assert r.compute({"party_count": 1}) == 0.0
 
 
+def test_event_count_reward_increase_only():
+    r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, event_weight=1.0)
+    r.reset()
+    # 1º passo calibra a base (flags já setadas no save state não pontuam)
+    assert r.compute({"event_flag_count": 10}) == 0.0
+    # +2 flags novas -> +2
+    assert r.compute({"event_flag_count": 12}) == pytest.approx(2.0)
+    # sem aumento -> 0
+    assert r.compute({"event_flag_count": 12}) == 0.0
+
+
+def test_event_count_robust_to_toggle():
+    """Flag TEMP que liga e desliga não deve repontuar (usa o máximo visto)."""
+    r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, event_weight=1.0)
+    r.reset()
+    r.compute({"event_flag_count": 10})         # base
+    assert r.compute({"event_flag_count": 11}) == pytest.approx(1.0)  # +1
+    assert r.compute({"event_flag_count": 10}) == 0.0  # desligou (sem punir)
+    assert r.compute({"event_flag_count": 11}) == 0.0  # religou: não repontua
+
+
+def test_event_weight_zero_disabled():
+    r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, event_weight=0.0)
+    r.reset()
+    assert r.compute({"event_flag_count": 5}) == 0.0
+    assert r.compute({"event_flag_count": 99}) == 0.0
+
+
 def test_flag_milestone_rewarded_once():
     r = EmeraldReward(
         exploration_weight=0.0, new_map_weight=0.0,

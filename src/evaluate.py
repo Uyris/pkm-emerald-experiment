@@ -3,11 +3,13 @@
 Uso:
     python -m src.evaluate --config configs/default.yaml --model models/ppo_emerald.zip
     python -m src.evaluate --config configs/default.yaml --no-render
+    python -m src.evaluate --record runs/eval.mp4   # grava o vídeo da avaliação
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 
 import cv2
 import numpy as np
@@ -18,20 +20,18 @@ from src.utils.config import load_config, make_vec_env
 WINDOW = "pokemon-emerald-rl [eval]"
 
 
-def _show(env, scale: int = 3) -> None:
-    """Desenha a tela do ambiente 0 numa janela OpenCV."""
+def _grab_bgr(env, scale: int = 3):
+    """Frame BGR ampliado do ambiente 0 (ou ``None``)."""
     frames = env.env_method("render", indices=[0])
     if not frames or frames[0] is None:
-        return
+        return None
     frame = np.asarray(frames[0])
     bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    bgr = cv2.resize(
+    return cv2.resize(
         bgr,
         (frame.shape[1] * scale, frame.shape[0] * scale),
         interpolation=cv2.INTER_NEAREST,
     )
-    cv2.imshow(WINDOW, bgr)
-    cv2.waitKey(1)
 
 
 def main() -> None:
@@ -46,6 +46,8 @@ def main() -> None:
     parser.add_argument("--stochastic", action="store_true",
                         help="Amostra ações em vez de usar argmax. Evita travar em loop "
                              "(ex.: preso num diálogo apertando sempre a mesma direção).")
+    parser.add_argument("--record", default=None,
+                        help="Grava a avaliação num arquivo de vídeo (ex.: runs/eval.mp4).")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -53,6 +55,7 @@ def main() -> None:
     n_episodes = args.episodes or eval_cfg.get("n_episodes", 5)
     deterministic = eval_cfg.get("deterministic", True) and not args.stochastic
     render = not args.no_render
+    scale = eval_cfg.get("render_scale", 3)
 
     # Avaliação roda 1 ambiente (n_envs=1), mesma construção vetorizada do treino.
     config.setdefault("train", {})["n_envs"] = 1
@@ -69,6 +72,10 @@ def main() -> None:
 
     model = PPO.load(args.model, env=env)
 
+    writer = None
+    if args.record:
+        os.makedirs(os.path.dirname(args.record) or ".", exist_ok=True)
+
     rewards = []
     try:
         for ep in range(n_episodes):
@@ -80,11 +87,29 @@ def main() -> None:
                 obs, reward, dones, infos = env.step(action)
                 total_reward += float(reward[0])
                 done = bool(dones[0])
-                if render:
-                    _show(env, scale=eval_cfg.get("render_scale", 3))
+
+                if render or args.record:
+                    bgr = _grab_bgr(env, scale=scale)
+                    if bgr is not None:
+                        if render:
+                            cv2.imshow(WINDOW, bgr)
+                            cv2.waitKey(1)
+                        if args.record:
+                            if writer is None:
+                                h, w = bgr.shape[:2]
+                                writer = cv2.VideoWriter(
+                                    args.record,
+                                    cv2.VideoWriter_fourcc(*"mp4v"),
+                                    30.0,
+                                    (w, h),
+                                )
+                            writer.write(bgr)
             rewards.append(total_reward)
             print(f"[ep {ep}] recompensa_total={total_reward:.3f}")
     finally:
+        if writer is not None:
+            writer.release()
+            print(f"[record] vídeo salvo em {args.record}")
         if render:
             cv2.destroyAllWindows()
             cv2.waitKey(1)
