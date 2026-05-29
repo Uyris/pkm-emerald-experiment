@@ -29,6 +29,7 @@ from typing import Optional, Tuple
 GSAVEBLOCK1_PTR = 0x03005D8C       # u32: ponteiro para SaveBlock1
 GPLAYER_PARTY = 0x020244EC         # base do array gPlayerParty
 GPLAYER_PARTY_COUNT = 0x020244E9   # u8: nº de Pokémon no time
+GENEMY_PARTY = 0x02024744          # gEnemyParty (= gPlayerParty + 6*100); verificado
 
 # --- Offsets dentro de SaveBlock1 ---
 SB1_POS_X = 0x0000        # s16: coordenada X do jogador (em tiles)
@@ -37,9 +38,11 @@ SB1_MAP_GROUP = 0x0004    # s8: grupo do mapa atual (WarpData.mapGroup)
 SB1_MAP_NUM = 0x0005      # s8: número do mapa atual (WarpData.mapNum)
 SB1_FLAGS = 0x1270        # base do array de flags (badges, eventos, ...)
 
-# --- Estrutura do Pokémon no time ---
+# --- Estrutura do Pokémon no time (campos fora da área criptografada) ---
 PARTY_MON_SIZE = 100      # bytes por struct Pokemon
-PARTY_MON_LEVEL_OFFSET = 84  # u8: level (campo fora da área criptografada)
+PARTY_MON_LEVEL_OFFSET = 84   # u8: level
+PARTY_MON_HP_OFFSET = 86      # u16: HP atual
+PARTY_MON_MAXHP_OFFSET = 88   # u16: HP máximo
 PARTY_SIZE = 6
 
 # --- Flags de badges (Emerald): FLAG_BADGE01_GET = 0x867 ---
@@ -111,18 +114,59 @@ class EmeraldMemory:
             return None
         return count
 
-    def get_max_level(self) -> Optional[int]:
-        """Maior level do time, ou ``None`` se o time estiver vazio/indisponível."""
+    def _party_levels(self) -> list:
+        """Lista de levels válidos do time (vazia se indisponível)."""
         count = self.get_party_count()
         if not count:
-            return None
+            return []
         levels = []
         for i in range(count):
             addr = GPLAYER_PARTY + i * PARTY_MON_SIZE + PARTY_MON_LEVEL_OFFSET
             lvl = self._u8(addr)
             if lvl and 1 <= lvl <= 100:
                 levels.append(lvl)
+        return levels
+
+    def get_max_level(self) -> Optional[int]:
+        """Maior level do time, ou ``None`` se o time estiver vazio/indisponível."""
+        levels = self._party_levels()
         return max(levels) if levels else None
+
+    def get_total_level(self) -> Optional[int]:
+        """Soma dos levels do time (estilo PWhiddy) — sinal denso para batalha.
+
+        Ganhar batalha sobe o level → a soma aumenta → recompensa. ``None`` se o
+        time estiver vazio/indisponível.
+        """
+        levels = self._party_levels()
+        return sum(levels) if levels else None
+
+    def get_enemy_hp_fraction(self) -> Optional[float]:
+        """Fração de HP do time INIMIGO (0.0 a 1.0), ou ``None`` se fora de batalha.
+
+        Lê ``gEnemyParty`` (HP/maxHP são campos planos). Recompensar a QUEDA
+        dessa fração dá um sinal DENSO de dano: cada golpe que acerta reduz o HP
+        → reward, derrotar o inimigo → fração chega a 0. Fora de batalha o
+        ``maxHP`` total costuma ser 0 (ou dados antigos estáticos) → ``None``/sem
+        variação, então não gera recompensa espúria.
+        """
+        cur_total = 0
+        max_total = 0
+        for i in range(PARTY_SIZE):
+            base = GENEMY_PARTY + i * PARTY_MON_SIZE
+            mh = self._u16(base + PARTY_MON_MAXHP_OFFSET)
+            if mh is None:
+                return None
+            if mh == 0 or mh > 999:  # slot vazio / valor implausível
+                continue
+            hp = self._u16(base + PARTY_MON_HP_OFFSET)
+            if hp is None:
+                return None
+            cur_total += min(hp, mh)
+            max_total += mh
+        if max_total == 0:
+            return None
+        return cur_total / max_total
 
     def get_badge_count(self) -> Optional[int]:
         """Número de badges conquistadas (0..8), ou ``None``."""
@@ -206,6 +250,7 @@ class EmeraldMemory:
         return {
             "party_count": self.get_party_count(),
             "max_level": self.get_max_level(),
+            "total_level": self.get_total_level(),
             "badge_count": self.get_badge_count(),
             "map_id": self.get_map_id(),
             "position": self.get_position(),

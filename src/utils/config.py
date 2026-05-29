@@ -61,6 +61,9 @@ def make_env(
         max_steps=env_cfg.get("max_steps", 4096),
         actions=env_cfg.get("actions"),  # None -> DEFAULT_ACTIONS (sem START)
         goals=env_cfg.get("goals"),
+        auto_advance_dialogue=env_cfg.get("auto_advance_dialogue", False),
+        auto_advance_button=env_cfg.get("auto_advance_button", "A"),
+        auto_advance_frames=env_cfg.get("auto_advance_frames", 4),
         reward_config=reward_cfg,
         render_mode=render_mode,
         backend=backend,

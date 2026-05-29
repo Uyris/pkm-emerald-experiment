@@ -86,6 +86,54 @@ def test_getting_starter_rewarded():
     assert r.compute({"party_count": 1}) == 0.0
 
 
+def test_total_level_reward_battle_signal():
+    """Soma de levels subindo (vencer batalha) pontua; sem subir, 0."""
+    r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, total_level_weight=2.0)
+    r.reset()
+    assert r.compute({"total_level": 5}) == 0.0          # base (1 Pokémon nv5)
+    assert r.compute({"total_level": 6}) == pytest.approx(2.0)   # subiu 1 nível
+    assert r.compute({"total_level": 6}) == 0.0
+    # pegar 2º Pokémon nv5 -> soma 6 -> 11 (+5) também pontua
+    assert r.compute({"total_level": 11}) == pytest.approx(10.0)
+
+
+def test_battle_damage_reward_on_hp_drop():
+    """Dano (fração de HP do inimigo caindo) pontua; derrotar = reward cheio."""
+    r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, battle_damage_weight=5.0)
+    r.reset()
+    assert r.compute({"enemy_hp_frac": 1.0}) == 0.0           # base (inimigo cheio)
+    assert r.compute({"enemy_hp_frac": 0.5}) == pytest.approx(2.5)   # tirou metade
+    assert r.compute({"enemy_hp_frac": 0.0}) == pytest.approx(2.5)   # derrotou (resto)
+    # total ao longo da batalha = 5.0 (= battle_damage_weight)
+
+
+def test_battle_damage_no_reward_when_hp_rises():
+    """Novo inimigo / cura (fração sobe) não pontua."""
+    r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, battle_damage_weight=5.0)
+    r.reset()
+    r.compute({"enemy_hp_frac": 0.0})                 # base
+    assert r.compute({"enemy_hp_frac": 1.0}) == 0.0   # novo inimigo: sem reward
+    assert r.compute({"enemy_hp_frac": 0.7}) == pytest.approx(1.5)  # dano de novo
+
+
+def test_battle_damage_none_resets_baseline():
+    """Sair da batalha (None) não pontua e zera a base p/ a próxima."""
+    r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, battle_damage_weight=5.0)
+    r.reset()
+    r.compute({"enemy_hp_frac": 1.0})
+    r.compute({"enemy_hp_frac": 0.5})
+    assert r.compute({"enemy_hp_frac": None}) == 0.0  # fora de batalha
+    # próxima batalha recalibra a base sem pontuar o "salto"
+    assert r.compute({"enemy_hp_frac": 1.0}) == 0.0
+
+
+def test_total_level_weight_zero_disabled():
+    r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, total_level_weight=0.0)
+    r.reset()
+    assert r.compute({"total_level": 5}) == 0.0
+    assert r.compute({"total_level": 50}) == 0.0
+
+
 def test_event_count_reward_increase_only():
     r = EmeraldReward(exploration_weight=0.0, new_map_weight=0.0, event_weight=1.0)
     r.reset()

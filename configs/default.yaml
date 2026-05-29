@@ -14,16 +14,16 @@ emulator:
   # PERTO da meta (fáceis) e vá aumentando os mais distantes conforme aprende.
   # Crie os checkpoints jogando: python scripts/make_init_state.py (F5 salva
   # vários, numerados). Leia os map_ids no caminho até a bolsa do Birch.
-  init_states:
-    - "roms/curr_007.state"   # parado na frente da Pokebola
-    - "roms/curr_008.state"   # fora da casa do vizinho
-    - "roms/curr_000.state"   # fora da casa do protagonista
-    - "roms/curr_010.state"   # no meio da cidade incial 
-    - "roms/init_state.state" # no quarto (mais difícil)
-  # Peso DOMINANTE no checkpoint do diálogo (curr_006) p/ ele praticar muito a
-  # ação de apertar A e passar. Mantém uma fração nos outros p/ não esquecer.
-  init_state_weights: [0.20, 0.15, 0.10, 0.40, 0.15]   # opcional; default = uniforme
-  init_state_strategy: "random"                 # "random" (pesos) ou "sequential"
+  # init_states:
+  #   - "roms/curr_007.state"   # parado na frente da Pokebola
+  #   - "roms/curr_008.state"   # fora da casa do vizinho
+  #   - "roms/curr_000.state"   # fora da casa do protagonista
+  #   - "roms/curr_010.state"   # no meio da cidade incial 
+  #   - "roms/init_state.state" # no quarto (mais difícil)
+  # # Peso DOMINANTE no checkpoint do diálogo (curr_006) p/ ele praticar muito a
+  # # ação de apertar A e passar. Mantém uma fração nos outros p/ não esquecer.
+  # init_state_weights: [0.20, 0.15, 0.10, 0.40, 0.15]   # opcional; default = uniforme
+  # init_state_strategy: "random"                 # "random" (pesos) ou "sequential"
   
   # headless é ignorado pelo backend real (a visualização é feita por fora).
   headless: true
@@ -44,19 +44,39 @@ env:
   # START fica de fora de propósito: abre o menu/salva e atrapalha a meta
   # inicial. Para reativar, adicione "START" (e "SELECT" se quiser) à lista.
   actions: ["UP", "DOWN", "LEFT", "RIGHT", "A", "B"]
+  # Auto-avanço de diálogo: quando o agente fica TRAVADO (posição/mapa não
+  # mudam) e NÃO está em combate, o env aperta A sozinho pra passar a caixa de
+  # texto (e confirmar menus, ex.: seleção do starter). É BLOQUEADO durante a
+  # luta (inimigo vivo) — não atrapalha a escolha de golpe. Resolve o agente
+  # ficar preso em diálogo sem precisar aprender a apertar A.
+  auto_advance_dialogue: true
+  auto_advance_button: "A"   # A avança texto E confirma (Yes); B cancelaria menus
+  auto_advance_frames: 4     # frames por toque do auto-avanço
   # Condição de término do episódio (terminated=True ao atingir a meta).
   # Sem isto, o episódio só termina por max_steps (fica longo após sair do quarto).
   goals:
     # leave_start_map: true   # termina ao sair do mapa inicial (sair do quarto)
-    party_count: 1        # termina ao pegar o starter (descomente p/ escalar)
+    # party_count: 1        # CUIDADO: começando de um save EM BATALHA o time já
+    #                       # tem Pokémon -> isto terminaria no passo 1. Só use
+    #                       # com saves ANTES de ter o starter.
     # map: [0, 1]           # termina ao chegar nesse [grupo, nº] de mapa (ex.: Oldale)
-    goal_reward: 10.0       # bônus ao atingir a meta
+    goal_reward: 10.0       # bônus ao atingir a meta (quando há condição ativa)
+    # Fase de batalha (save em batalha): deixe SEM condição de meta. O sinal vem
+    # do total_level_weight (vencer -> sobe level -> reward) + truncamento.
 
 reward:
   exploration_weight: 0.02   # por visitar tile (map, x, y) inédito
   new_map_weight: 2.0        # por entrar em um mapa novo
   party_weight: 5.0          # por novo Pokémon no time (starter = 0 -> 1)
-  level_weight: 1.0          # por aumento de level
+  level_weight: 0.0          # por aumento do MAIOR level (desligado: ver total_level_weight)
+  # SOMA dos levels do time (estilo PWhiddy): cada level ganho ao vencer batalha
+  # pontua (sinal ESPARSO — só ao vencer).
+  total_level_weight: 2.0
+  # DANO causado: recompensa a queda da fração de HP do inimigo. Sinal DENSO —
+  # cada golpe que acerta pontua, então ensina a ATACAR mesmo sem vencer a
+  # batalha inteira (resolve o "fica preso no menu"). Derrotar 1 inimigo ~= este
+  # valor no total. É o principal reward pra APRENDER a lutar.
+  battle_damage_weight: 5.0
   badge_weight: 10.0         # por nova badge
   # Progresso de história (estilo PWhiddy): recompensa por cada NOVA flag de
   # evento setada (cutscenes, marcos de história). Sinal genérico e à prova de
@@ -70,7 +90,7 @@ reward:
   #   REGRA: mantenha << exploration_weight (ex.: 1/10). Se ~= exploração,
   #          anula o sinal de explorar e a IA fica parada no canto.
   #   < 0  -> BÔNUS por passo (incentiva ficar parado); quase nunca é o desejado.
-  step_penalty: 0.002
+  step_penalty: 0.0
   # Marcos por flag de evento: recompensa (1x/episódio) quando a flag liga.
   # Útil para pré-requisitos sem sinal próprio (ex.: cutscene na casa do
   # vizinho, obrigatória antes de pegar o starter). Descubra a flag com:
@@ -81,7 +101,7 @@ reward:
 train:
   algo: "PPO"
   policy: "CnnPolicy"
-  total_timesteps: 2000000
+  total_timesteps: 1000000
   # Paralelismo: 1 -> DummyVecEnv (in-process); >1 -> SubprocVecEnv.
   # Cada env é um processo com seu próprio core do mGBA (~150-250 MB).
   # Use ~nº de núcleos físicos (acima disso não acelera, só consome RAM).
@@ -105,10 +125,19 @@ train:
   render_freq: 10          # atualiza a cada N passos (use >1 com muitos envs)
   render_scale: 2         # ampliação por célula (GBA é 240x160; menor p/ caber a grade)
   # Logging
+  # Cada run salva uma pasta logs/PPO_<timestamp>/ com log.txt (tabelas
+  # completas, sem truncar), progress.csv e eventos do TensorBoard.
+  log_dir: "logs/"
   tensorboard_log: "tensorboard/"
   stats_log_freq: 256
   checkpoint_freq: 50000
   save_path: "models/ppo_emerald.zip"
+  # Melhor modelo: avalia periodicamente e salva models/best_model.zip (guarda o
+  # pico, evita o problema "modelo final pior que o pico"). Use o best_model no
+  # evaluate / como base do próximo --resume.
+  eval_best: true
+  eval_freq: 50000        # passos entre avaliações (dividido por n_envs internamente)
+  n_eval_episodes: 3      # episódios por avaliação (mais = menos ruído, mais lento)
   # Weights & Biases (opcional; também ativável via --wandb)
   wandb: false
   wandb_project: "pokemon-emerald-rl"

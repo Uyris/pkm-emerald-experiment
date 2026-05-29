@@ -15,10 +15,17 @@ Recursos:
 from __future__ import annotations
 
 import argparse
+import copy
+import datetime
 import os
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
+from stable_baselines3.common.callbacks import (
+    CallbackList,
+    CheckpointCallback,
+    EvalCallback,
+)
+from stable_baselines3.common.logger import configure
 
 from src.utils.callbacks import (
     EntCoefDecayCallback,
@@ -77,6 +84,16 @@ def main() -> None:
             verbose=1,
         )
 
+    # --- Logger: salva TODOS os logs do run em arquivo (além do console) ---
+    # Gera, por run, uma pasta com:
+    #   log.txt       -> as mesmas tabelas que aparecem no terminal (completas)
+    #   progress.csv  -> métricas por iteração (fácil de plotar/analisar)
+    #   eventos do TensorBoard
+    run_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join(train_cfg.get("log_dir", "logs"), f"PPO_{run_name}")
+    model.set_logger(configure(run_dir, ["stdout", "log", "csv", "tensorboard"]))
+    print(f"[logs] salvando o run em {run_dir} (log.txt, progress.csv, tensorboard)")
+
     # ---- Callbacks ----
     callbacks = [
         CheckpointCallback(
@@ -110,6 +127,30 @@ def main() -> None:
         )
         print(f"[ent_coef] decaindo de {ent_coef_start} -> {ent_coef_final} ao longo de {total_timesteps} passos.")
 
+    # --- Melhor modelo: avalia periodicamente e salva models/best_model.zip ---
+    # Resolve o problema "o modelo final é pior que o pico": guarda o melhor por
+    # recompensa de avaliação, independente de quando o treino degradar.
+    eval_env = None
+    if train_cfg.get("eval_best", True):
+        n_envs = max(1, int(train_cfg.get("n_envs", 1)))
+        eval_config = copy.deepcopy(config)
+        eval_config.setdefault("train", {})["n_envs"] = 1  # avaliação com 1 env
+        eval_env = make_vec_env(eval_config, render_mode=None)
+        best_dir = os.path.dirname(save_path) or "."
+        callbacks.append(
+            EvalCallback(
+                eval_env,
+                best_model_save_path=best_dir,
+                log_path=run_dir,
+                eval_freq=max(int(train_cfg.get("eval_freq", 50000)) // n_envs, 1),
+                n_eval_episodes=int(train_cfg.get("n_eval_episodes", 3)),
+                deterministic=config.get("eval", {}).get("deterministic", True),
+                render=False,
+            )
+        )
+        print(f"[eval] melhor modelo -> {os.path.join(best_dir, 'best_model.zip')} "
+              f"(a cada ~{train_cfg.get('eval_freq', 50000)} passos)")
+
     if args.wandb or train_cfg.get("wandb", False):
         _maybe_add_wandb(callbacks, config)
 
@@ -121,7 +162,11 @@ def main() -> None:
 
     model.save(save_path)
     print(f"\nModelo salvo em: {save_path}")
+    if train_cfg.get("eval_best", True):
+        print(f"Melhor modelo (por avaliação): {os.path.join(os.path.dirname(save_path) or '.', 'best_model.zip')}")
     env.close()
+    if eval_env is not None:
+        eval_env.close()
 
 
 def _maybe_add_wandb(callbacks: list, config: dict) -> None:

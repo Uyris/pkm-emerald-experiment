@@ -38,6 +38,8 @@ class EmeraldReward:
         new_map_weight: float = 1.0,
         party_weight: float = 5.0,
         level_weight: float = 1.0,
+        total_level_weight: float = 0.0,
+        battle_damage_weight: float = 0.0,
         badge_weight: float = 10.0,
         event_weight: float = 0.0,
         step_penalty: float = 0.0,
@@ -47,6 +49,13 @@ class EmeraldReward:
         self.new_map_weight = new_map_weight
         self.party_weight = party_weight
         self.level_weight = level_weight
+        # Soma dos levels do time (estilo PWhiddy): cada level ganho (por vencer
+        # batalha) pontua. Veja get_total_level.
+        self.total_level_weight = total_level_weight
+        # Dano causado: recompensa a QUEDA da fração de HP do inimigo. Sinal
+        # DENSO de batalha (cada golpe que acerta pontua), que ensina a atacar
+        # mesmo sem vencer a batalha inteira. Veja get_enemy_hp_fraction.
+        self.battle_damage_weight = battle_damage_weight
         self.badge_weight = badge_weight
         # Progresso de história: recompensa por NOVA flag de evento setada
         # (estilo PWhiddy). Robusto contra "farm" de diálogo. Veja
@@ -61,7 +70,9 @@ class EmeraldReward:
         self._visited_maps: set = set()
         self._prev_party_count: Optional[int] = None
         self._prev_max_level: Optional[int] = None
+        self._prev_total_level: Optional[int] = None
         self._prev_badge_count: Optional[int] = None
+        self._prev_enemy_hp_frac: Optional[float] = None
         self._max_event_count: Optional[int] = None
         self._fired_flags: set = set()
 
@@ -72,7 +83,9 @@ class EmeraldReward:
         self._visited_maps = set()
         self._prev_party_count = None
         self._prev_max_level = None
+        self._prev_total_level = None
         self._prev_badge_count = None
+        self._prev_enemy_hp_frac = None
         self._max_event_count = None
         self._fired_flags = set()
 
@@ -87,6 +100,8 @@ class EmeraldReward:
         reward += self._new_map_reward(info)
         reward += self._party_reward(info)
         reward += self._level_reward(info)
+        reward += self._total_level_reward(info)
+        reward += self._battle_damage_reward(info)
         reward += self._badge_reward(info)
         reward += self._event_reward(info)
         reward += self._flag_milestone_reward(info)
@@ -171,6 +186,40 @@ class EmeraldReward:
         delta = level - self._prev_max_level
         self._prev_max_level = level
         return self.level_weight * delta if delta > 0 else 0.0
+
+    def _total_level_reward(self, info: dict) -> float:
+        """Recompensa por aumento da SOMA dos levels do time (sinal de batalha)."""
+        if self.total_level_weight == 0:
+            return 0.0
+        level = info.get("total_level")
+        if level is None:
+            return 0.0
+        if self._prev_total_level is None:
+            self._prev_total_level = level
+            return 0.0
+        delta = level - self._prev_total_level
+        self._prev_total_level = level
+        return self.total_level_weight * delta if delta > 0 else 0.0
+
+    def _battle_damage_reward(self, info: dict) -> float:
+        """Recompensa a QUEDA da fração de HP do inimigo (dano causado).
+
+        Derrotar um inimigo (fração 1.0 → 0.0) rende ~battle_damage_weight no
+        total. Só pontua quedas: início de batalha/novo inimigo (fração sobe)
+        não gera recompensa.
+        """
+        if self.battle_damage_weight == 0:
+            return 0.0
+        frac = info.get("enemy_hp_frac")
+        if frac is None:
+            self._prev_enemy_hp_frac = None  # saiu da batalha: zera a base
+            return 0.0
+        if self._prev_enemy_hp_frac is None:
+            self._prev_enemy_hp_frac = frac
+            return 0.0
+        drop = self._prev_enemy_hp_frac - frac
+        self._prev_enemy_hp_frac = frac
+        return self.battle_damage_weight * drop if drop > 0 else 0.0
 
     def _badge_reward(self, info: dict) -> float:
         badges = info.get("badge_count")

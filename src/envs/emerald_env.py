@@ -79,6 +79,9 @@ class PokemonEmeraldEnv(gym.Env):
         headless: bool = True,
         actions: Optional[Sequence[str]] = None,
         goals: Optional[dict] = None,
+        auto_advance_dialogue: bool = False,
+        auto_advance_button: str = "A",
+        auto_advance_frames: int = 4,
         render_mode: Optional[str] = None,
         backend: Optional[GbaBackend] = None,
     ) -> None:
@@ -90,6 +93,11 @@ class PokemonEmeraldEnv(gym.Env):
         self.max_steps = max_steps
         self.goals = goals or {}
         self.goal_reward = float(self.goals.get("goal_reward", 0.0))
+        # Auto-avanço de diálogo (passa caixas de texto quando travado, fora de
+        # combate). Veja a lógica no step().
+        self.auto_advance = bool(auto_advance_dialogue)
+        self.auto_advance_button = auto_advance_button
+        self.auto_advance_frames = max(1, int(auto_advance_frames))
         self.render_mode = render_mode
 
         # --- Currículo de save states ---
@@ -195,6 +203,10 @@ class PokemonEmeraldEnv(gym.Env):
 
         button = self.actions[int(action)]
 
+        # Posição/mapa ANTES da ação (para detectar "travado", ex.: diálogo).
+        prev_pos = self.memory.get_position()
+        prev_map = self.memory.get_map_id()
+
         # Pressiona o botão, avança frames (action repeat), solta tudo.
         self.backend.press_button(button)
         self.backend.step_frame(self.frame_skip)
@@ -202,12 +214,36 @@ class PokemonEmeraldEnv(gym.Env):
 
         self._steps += 1
 
+        # Auto-avanço de diálogo: se o agente ficou TRAVADO (posição/mapa não
+        # mudaram) e NÃO está em combate, dá um toque em A para passar a caixa
+        # de texto / confirmar menu. Bloqueado durante a luta (inimigo vivo)
+        # para não atrapalhar a seleção de golpe.
+        auto_advanced = False
+        if self.auto_advance:
+            cur_pos = self.memory.get_position()
+            cur_map = self.memory.get_map_id()
+            blocked = (
+                cur_pos is not None and cur_pos == prev_pos and cur_map == prev_map
+            )
+            frac = self.memory.get_enemy_hp_fraction()
+            in_battle = frac is not None and frac > 0
+            if blocked and not in_battle:
+                self.backend.press_button(self.auto_advance_button)
+                self.backend.step_frame(self.auto_advance_frames)
+                self.backend.release_all()
+                self.backend.step_frame(self.auto_advance_frames)
+                auto_advanced = True
+
         obs = self._get_obs()
         info = self.memory.snapshot()
+        if auto_advanced:
+            info["auto_advanced"] = True
         if self._milestone_flags:
             info["flags"] = {fid: self.memory.get_flag(fid) for fid in self._milestone_flags}
         if self.reward_fn.event_weight > 0:
             info["event_flag_count"] = self.memory.get_event_flag_count()
+        if self.reward_fn.battle_damage_weight > 0:
+            info["enemy_hp_frac"] = self.memory.get_enemy_hp_fraction()
         reward = self.reward_fn.compute(info)
 
         # Término por meta atingida (configurável). Bônus terminal opcional.
